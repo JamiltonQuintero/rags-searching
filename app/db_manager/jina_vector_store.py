@@ -1,17 +1,19 @@
-
 import requests
 import numpy as np
-from pypdf import PdfReader
+import tiktoken
+from langchain_text_splitters import NLTKTextSplitter
 from typing import List, Dict, Optional
-import pdfplumber
 import os
 from dotenv import load_dotenv
+
+from app.db_manager.text_processor import TextPreprocessor
+import pdfplumber
 
 class JinaLateChunkingDB:
     def __init__(self):
         # Load environment variables
         load_dotenv()
-        
+
         # Listas para almacenar los documentos y embeddings indexados
         self.docs = []
         self.embeddings = []
@@ -19,8 +21,10 @@ class JinaLateChunkingDB:
         self.jina_api_key = os.getenv('JINA_API_KEY')
         # Modelo de embeddings a utilizar
         self.embedding_model = 'jina-embeddings-v3'
+        self.text_splitter = NLTKTextSplitter(chunk_size=16000, language='spanish')
+        self.text_processor = TextPreprocessor()
 
-    import pdfplumber
+        self.encoding = tiktoken.encoding_for_model("gpt-4")
 
     def _extract_text_from_pdf(self, file_path: str) -> str:
         """
@@ -62,38 +66,19 @@ class JinaLateChunkingDB:
 
         return chunks, num_tokens
 
-    def _split_text_into_sections(self, text: str, max_total_tokens: int = 8000):
-        """
-        Divide el texto en secciones donde el número total de tokens no exceda max_total_tokens.
-        """
-        sections = []
-        start = 0
-        text_length = len(text)
-
-        while start < text_length:
-            end = min(start + (max_total_tokens * 4), text_length)  # Estimación de 4 caracteres por token
-            section_text = text[start:end]
-            sections.append(section_text.strip())
-            start = end
-
-        return sections
-
-    def _generate_chunk_embeddings(self, chunks: List[str], full_text: str):
+    def _generate_chunk_embeddings(self, chunks: List[str]):
         url = 'https://api.jina.ai/v1/embeddings'
         headers = {
             'Content-Type': 'application/json',
             'Authorization': f'Bearer {self.jina_api_key}'
         }
 
-        # Preparar la entrada para la API de embeddings
-        input_texts = [full_text] + chunks
-
         data = {
             "model": self.embedding_model,
             "task": "text-matching",
             "late_chunking": True,
             "embedding_type": "float",
-            "input": input_texts
+            "input": chunks
         }
 
         response = requests.post(url, headers=headers, json=data)
@@ -117,22 +102,20 @@ class JinaLateChunkingDB:
         # Verificar si el número total de tokens excede el límite de la API
         if num_tokens + sum(len(chunk) for chunk in chunks) > 8194:
             # Dividir el texto en secciones más pequeñas
-            sections = self._split_text_into_sections(text)
+            sections = self.text_splitter.split_text(text)
             total_chunks = 0
 
             for section_idx, section_text in enumerate(sections):
                 # Obtener chunks y número de tokens para la sección
-                section_chunks, section_num_tokens = self.chunk_by_tokenizer_api(section_text, max_chunk_length=1000)
-
-                # Verificar si la sección excede el límite de tokens
-                if section_num_tokens + sum(len(chunk) for chunk in section_chunks) > 8194:
-                    raise Exception("La sección y sus chunks exceden el límite de tokens de la API de Jina.")
+                #section_chunks, section_num_tokens = self.chunk_by_tokenizer_api(section_text, max_chunk_length=1000)
+                # Luego, divide cada chunk inicial en chunks semánticos
+                semantic_chunks = self.text_processor.get_semantic_chunks(section_text)
 
                 # Generar embeddings con late chunking
-                chunk_embeddings = self._generate_chunk_embeddings(section_chunks, section_text)
+                chunk_embeddings = self._generate_chunk_embeddings(semantic_chunks)
 
                 # Almacenar los chunks y sus embeddings
-                for idx, (chunk_text, chunk_embedding) in enumerate(zip(section_chunks, chunk_embeddings)):
+                for idx, (chunk_text, chunk_embedding) in enumerate(zip(semantic_chunks, chunk_embeddings)):
                     doc = {
                         'text': chunk_text,
                         'embedding': chunk_embedding,
@@ -140,7 +123,7 @@ class JinaLateChunkingDB:
                             **(metadata or {}),
                             'section_id': section_idx,
                             'chunk_id': idx,
-                            'chunk_total': len(section_chunks)
+                            'chunk_total': len(sections)
                         }
                     }
                     self.docs.append(doc)
@@ -150,7 +133,7 @@ class JinaLateChunkingDB:
             print(f"Se han indexado {total_chunks} chunks.")
         else:
             # Generar embeddings con late chunking
-            chunk_embeddings = self._generate_chunk_embeddings(chunks, text)
+            chunk_embeddings = self._generate_chunk_embeddings(chunks)
 
             # Almacenar los chunks y sus embeddings
             for idx, (chunk_text, chunk_embedding) in enumerate(zip(chunks, chunk_embeddings)):
@@ -168,9 +151,129 @@ class JinaLateChunkingDB:
 
             print(f"Se han indexado {len(chunks)} chunks.")
 
-    def index_pdf(self, file_path: str) -> List[str]:
+    def index_document_jina(self, text: str, metadata: Optional[Dict] = None):
+        # Obtener todos los chunks y el número total de tokens
+        chunks, num_tokens = self.chunk_by_tokenizer_api(text, max_chunk_length=1000)
+
+        # Establecemos un límite total de tokens para cada batch que enviamos a Jina
+        token_limit = 8000
+
+        current_batch = []
+        current_batch_tokens = 0
+        total_chunks = 0
+
+        for idx, chunk in enumerate(chunks):
+            chunk_tokens = self.calculate_total_tokens(chunk)
+
+            # Si agregar este chunk excede el límite, enviamos la tanda actual a Jina
+            if current_batch_tokens + chunk_tokens > token_limit:
+                # Enviamos la tanda actual a Jina para embeddings
+                chunk_embeddings = self._generate_chunk_embeddings(current_batch)
+
+                # Guardamos los resultados
+                for batch_idx, (batch_chunk, batch_embedding) in enumerate(zip(current_batch, chunk_embeddings)):
+                    doc = {
+                        'text': batch_chunk,
+                        'embedding': batch_embedding,
+                        'metadata': {
+                            **(metadata or {}),
+                            'chunk_id': total_chunks + batch_idx,
+                            'chunk_total': len(chunks)
+                        }
+                    }
+                    self.docs.append(doc)
+                    self.embeddings.append(batch_embedding)
+
+                total_chunks += len(current_batch)
+
+                # Iniciamos una nueva tanda con el chunk actual
+                current_batch = [chunk]
+                current_batch_tokens = chunk_tokens
+            else:
+                # Agregamos el chunk a la tanda actual
+                current_batch.append(chunk)
+                current_batch_tokens += chunk_tokens
+
+        # Si quedan chunks sin procesar al final, también enviamos esa tanda
+        if current_batch:
+            chunk_embeddings = self._generate_chunk_embeddings(current_batch)
+            for batch_idx, (batch_chunk, batch_embedding) in enumerate(zip(current_batch, chunk_embeddings)):
+                doc = {
+                    'text': batch_chunk,
+                    'embedding': batch_embedding,
+                    'metadata': {
+                        **(metadata or {}),
+                        'chunk_id': total_chunks + batch_idx,
+                        'chunk_total': len(chunks)
+                    }
+                }
+                self.docs.append(doc)
+                self.embeddings.append(batch_embedding)
+
+            total_chunks += len(current_batch)
+
+        print(f"Se han indexado {total_chunks} chunks.")
+
+    def calculate_total_tokens(self, message: str):
+        return len(self.encoding.encode(message))
+
+   #REVISAR IMPLEMENTACION
+    def index_document_embedding(self, chunks, num_tokens):
+
+        # Verificar si el número total de tokens excede el límite de la API
+        if num_tokens + sum(len(chunk) for chunk in chunks) > 8194:
+                # Dividir el texto en secciones más pequeñas
+            sections = self.text_splitter.split_text(text)
+            total_chunks = 0
+
+            for section_idx, section_text in enumerate(sections):
+                # Obtener chunks y número de tokens para la sección
+                #section_chunks, section_num_tokens = self.chunk_by_tokenizer_api(section_text, max_chunk_length=1000)
+                # Luego, divide cada chunk inicial en chunks semánticos
+                semantic_chunks = self.text_processor.get_semantic_chunks(section_text)
+
+                # Generar embeddings con late chunking
+                chunk_embeddings = self._generate_chunk_embeddings(semantic_chunks)
+
+                # Almacenar los chunks y sus embeddings
+                for idx, (chunk_text, chunk_embedding) in enumerate(zip(semantic_chunks, chunk_embeddings)):
+                    doc = {
+                        'text': chunk_text,
+                        'embedding': chunk_embedding,
+                        'metadata': {
+                            'section_id': section_idx,
+                            'chunk_id': idx,
+                            'chunk_total': len(sections)
+                        }
+                    }
+                    self.docs.append(doc)
+                    self.embeddings.append(chunk_embedding)
+                    total_chunks += 1
+
+            print(f"Se han indexado {total_chunks} chunks.")
+        else:
+            # Generar embeddings con late chunking
+            chunk_embeddings = self._generate_chunk_embeddings(chunks)
+
+            # Almacenar los chunks y sus embeddings
+            for idx, (chunk_text, chunk_embedding) in enumerate(zip(chunks, chunk_embeddings)):
+                doc = {
+                    'text': chunk_text,
+                    'embedding': chunk_embedding,
+                    'metadata': {
+                        'chunk_id': idx,
+                        'chunk_total': len(chunks)
+                    }
+                }
+                self.docs.append(doc)
+                self.embeddings.append(chunk_embedding)
+
+            print(f"Se han indexado {len(chunks)} chunks.")
+
+
+    def process_pdf(self, file_path: str) -> List[str]:
         text = self._extract_text_from_pdf(file_path)
-        self.index_document(text, metadata={'source': file_path})
+        self.index_document_jina(text, metadata={'source': file_path})
         return [f"doc_{file_path}"]
 
     def search(self, query: str, k: int = 3) -> List[Dict]:

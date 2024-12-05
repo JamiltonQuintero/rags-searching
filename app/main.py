@@ -1,16 +1,17 @@
 import logging
 import os
-from enum import Enum
 from typing import Optional, List
 
+import pdfplumber
 from dotenv import load_dotenv
 from fastapi import Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
+
+from app.db_manager.jina_vector_store import JinaLateChunkingDB
 from app.db_manager.vector_store_contextual import VectorDatabaseContextualOpenIA
 
 from fastapi import FastAPI, UploadFile, File, HTTPException
-from app.db_manager.jina_vector_store import JinaLateChunkingDB
 from app.db_manager.vector_store_naive import VectorDatabaseNaive
 from app.db_manager.elasticsearch_store import ElasticsearchStore
 
@@ -52,6 +53,46 @@ class ElasticsearchQueryPayload(BaseModel):
     filters: Optional[dict] = None
     k: Optional[int] = 20
 
+@app.post("/upload-pdf")
+async def upload_pdf_contextual(file: UploadFile = File(...)):
+    if not file.filename.endswith('.pdf'):
+        return {"error": "El archivo debe ser un PDF"}
+
+    temp_file_path = f"temp_{file.filename}"
+    try:
+        with open(temp_file_path, "wb") as buffer:
+            content = await file.read()
+            buffer.write(content)
+
+
+        """Procesa un archivo PDF usando el chunking de Jina"""
+        raw_text = ""
+        with pdfplumber.open(temp_file_path) as pdf:
+            for page in pdf.pages:
+                text = page.extract_text()
+                if text:
+                    # Limpiar caracteres NUL y normalizar el texto
+                    text = text.replace('\x00', '')
+                    raw_text += text + "\n\n"
+
+        documents = []
+        chunks, num_tokens = naive.chunk_by_tokenizer_api(raw_text)
+
+        # Procesar el PDF con el enfoque contextual
+        naive.generate_embedding(chunks)
+        await vector_db.add_pdf_to_store_embeddings(chunks)
+        jina_db.index_document_embedding(chunks, num_tokens)
+
+        return {
+            "filename": file.filename,
+            "status": "success",
+            "message": "PDF cargado y procesado correctamente con motor contextual",
+        }
+    finally:
+        if os.path.exists(temp_file_path):
+            os.remove(temp_file_path)
+
+
 @app.post("/upload-pdf/naive")
 async def upload_pdf_contextual(file: UploadFile = File(...)):
     if not file.filename.endswith('.pdf'):
@@ -69,7 +110,7 @@ async def upload_pdf_contextual(file: UploadFile = File(...)):
         return {
             "filename": file.filename,
             "status": "success",
-            "message": "PDF cargado y procesado correctamente con motor contextual",
+            "message": "PDF cargado y procesado correctamente con motor naive",
         }
     finally:
         if os.path.exists(temp_file_path):
@@ -111,13 +152,12 @@ async def upload_pdf_jina(file: UploadFile = File(...)):
             buffer.write(content)
 
         # Procesar el PDF con Jina usando la instancia global
-        ids = jina_db.index_pdf(temp_file_path)
+        jina_db.process_pdf(temp_file_path)
 
         return {
             "filename": file.filename,
             "status": "success",
             "message": "PDF cargado y procesado correctamente con motor Jina",
-            "document_ids": ids
         }
     finally:
         if os.path.exists(temp_file_path):

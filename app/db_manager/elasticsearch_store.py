@@ -1,6 +1,7 @@
 import logging
 from typing import List, Dict, Any
 import os
+import requests
 import pdfplumber
 
 from elasticsearch import Elasticsearch
@@ -28,7 +29,8 @@ class ElasticsearchStore:
         self.metadata_field = "metadata"
         
         self.text_processor = TextPreprocessor()
-        
+        self.jina_api_key = os.getenv('JINA_API_KEY')
+
         # Crear índice si no existe
         self._create_index()
 
@@ -63,11 +65,12 @@ class ElasticsearchStore:
                     raw_text += text + "\n\n"
 
         # Obtener chunks semánticos
-        chunks = self.text_processor.get_semantic_chunks(raw_text)
-        
+        #chunks = self.text_processor.get_semantic_chunks(raw_text)
+        chunks, num_tokens = self.chunk_by_tokenizer_api(text, max_chunk_length=1000)
+
         # Crear documentos y embeddings
         documents = []
-        requests = []
+        _requests = []
         
         for i, chunk in enumerate(chunks):
             # Crear documento de Langchain
@@ -92,15 +95,42 @@ class ElasticsearchStore:
                 self.vector_field: vector,
                 self.metadata_field: doc.metadata
             }
-            requests.append(es_doc)
+            _requests.append(es_doc)
 
         # Indexar documentos en bulk
         if requests:
-            bulk(self.es_client, requests)
+            bulk(self.es_client, _requests)
             self.es_client.indices.refresh(index=self.index_name)
-            logger.debug(f"Indexados {len(requests)} documentos en Elasticsearch")
+            logger.debug(f"Indexados {len(_requests)} documentos en Elasticsearch")
 
         return documents
+    def chunk_by_tokenizer_api(self, input_text: str, max_chunk_length: int = 1000):
+        # Definir el endpoint y el payload de la API
+        url = 'https://segment.jina.ai/'
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {self.jina_api_key}'
+        }
+        payload = {
+            "content": input_text,
+            "return_chunks": True,
+            "max_chunk_length": max_chunk_length,
+            "tokenizer": "cl100k_base",  # Puedes ajustar el tokenizer si es necesario
+            "return_overlaps": False  # Asumimos que no necesitamos solapamiento
+        }
+
+        # Realizar la solicitud a la API
+        response = requests.post(url, headers=headers, json=payload)
+        response_data = response.json()
+
+        if 'error' in response_data:
+            raise Exception(f"Error en tokenizer API: {response_data['error']}")
+
+        # Extraer chunks y número total de tokens del response
+        chunks = response_data.get("chunks", [])
+        num_tokens = response_data.get("num_tokens", 0)
+
+        return chunks, num_tokens
 
     def search(self, query: str, k: int = 20) -> List[Dict[str, Any]]:
         """Realiza una búsqueda KNN en Elasticsearch"""

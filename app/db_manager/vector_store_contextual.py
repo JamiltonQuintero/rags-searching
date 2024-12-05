@@ -125,54 +125,19 @@ class VectorDatabaseContextualOpenIA:
             for page in pdf.pages:
                 text = page.extract_text()
                 if text:
+                    # Limpiar caracteres NUL y normalizar el texto
+                    text = text.replace('\x00', '')
                     raw_text += text + "\n\n"
         
         documents = []
-        sections = self._split_text_into_sections(raw_text)
-        
-        total_chunks = 0
-        for section_idx, section_text in enumerate(sections):
-            # Obtener chunks usando la API de Jina
-            chunks, num_tokens = self.chunk_by_tokenizer_api(section_text)
-
-            # Crear documentos de Langchain para cada chunk
-            for chunk_idx, chunk_text in enumerate(chunks):
-                doc = Document(
-                    page_content=chunk_text,
-                    metadata={
-                        "source": file_path,
-                        "section_id": section_idx,
-                        "chunk_id": total_chunks + chunk_idx,
-                        "chunk_total": len(chunks)
-                    }
-                )
-                documents.append(doc)
-            total_chunks += len(chunks)
-        
-        return documents
-
-    def process_pdf(self, file_path: str) -> List[Document]:
-        """Procesa un archivo PDF usando el chunking de Jina"""
-        raw_text = ""
-        with pdfplumber.open(file_path) as pdf:
-            for page in pdf.pages:
-                text = page.extract_text()
-                if text:
-                    raw_text += text + "\n\n"
-
-        documents = []
-        sections = self._split_text_into_sections(raw_text)
-
-        total_chunks = 0
-        # for section_idx, section_text in enumerate(sections):
-        # Obtener chunks usando la API de Jina
-        # chunks, num_tokens = self.chunk_by_tokenizer_api(section_text)
         chunks = self.text_processor.get_semantic_chunks(raw_text)
 
         # Crear documentos de Langchain para cada chunk
         for chunk_idx, chunk_text in enumerate(chunks):
+            # Limpiar el chunk
+            clean_chunk = chunk_text.replace('\x00', '')
             doc = Document(
-                page_content=chunk_text,
+                page_content=clean_chunk,
                 metadata={
                     "source": file_path,
                     "chunk_id": chunk_idx,
@@ -181,31 +146,60 @@ class VectorDatabaseContextualOpenIA:
             )
             documents.append(doc)
 
-        return documents
+        # Crear chunks contextuales
+        contextual_documents = self._create_contextual_chunks(documents)
+        return contextual_documents
+
+    def generate_embedding(self, chunks) -> List[Document]:
+        documents = []
+        # Crear documentos de Langchain para cada chunk
+        for chunk_idx, chunk_text in enumerate(chunks):
+            # Limpiar el chunk
+            clean_chunk = chunk_text.replace('\x00', '')
+            doc = Document(
+                page_content=clean_chunk,
+                metadata={
+                    "chunk_id": chunk_idx,
+                    "chunk_total": len(chunks)
+                }
+            )
+            documents.append(doc)
+
+        # Crear chunks contextuales
+        contextual_documents = self._create_contextual_chunks(documents)
+        return contextual_documents
+
     def _create_contextual_chunks(self, documents: List[Document]) -> List[Document]:
         """Implementación del Contextual RAG según el paper de Anthropic"""
         contextual_documents = []
         docs_by_source = self._group_docs_by_source(documents)
         
         for source, docs in docs_by_source.items():
-            full_document = self._get_full_document(docs)
+            # Limpiar el documento completo
+            full_document = self._get_full_document(docs).replace('\x00', '')
             
             for doc in docs:
+                # Limpiar el contenido del chunk
+                clean_content = doc.page_content.replace('\x00', '')
+                
                 contextual_explanation = self._generate_context(
                     CONTEXTUAL_RAG_PROMPT.format(
                         WHOLE_DOCUMENT=full_document,
-                        CHUNK_CONTENT=doc.page_content
+                        CHUNK_CONTENT=clean_content
                     )
                 )
                 
+                # Limpiar la explicación contextual
+                clean_explanation = contextual_explanation.replace('\x00', '')
+                
                 # Crear chunk contextual combinando explicación y contenido original
-                contextual_content = f"{contextual_explanation}\n\n{doc.page_content}"
+                contextual_content = f"{clean_explanation}\n\n{clean_content}"
                 contextual_doc = Document(
                     page_content=contextual_content,
                     metadata={
                         **doc.metadata,
-                        "contextual_explanation": contextual_explanation,
-                        "original_content": doc.page_content,
+                        "contextual_explanation": clean_explanation,
+                        "original_content": clean_content,
                         "has_context": True
                     }
                 )
@@ -241,6 +235,21 @@ class VectorDatabaseContextualOpenIA:
         # Generar IDs únicos para cada chunk
         ids = [f"doc_{file_path}_{i}" for i in range(len(contextual_documents))]
         
+        # Añadir a PGVector
+        self.vector_store.add_documents(contextual_documents)
+        return ids
+
+    async def add_pdf_to_store_embeddings(self, chunks) -> List[str]:
+        """Añade un PDF a la base de datos vectorial con contexto usando el chunking de Jina"""
+        # Procesar el PDF usando el chunking de Jina
+        initial_documents = self.generate_embedding(chunks)
+
+        # Crear chunks con contexto
+        contextual_documents = self._create_contextual_chunks(initial_documents)
+
+        # Generar IDs únicos para cada chunk
+        ids = [f"doc_{i}" for i in range(len(contextual_documents))]
+
         # Añadir a PGVector
         self.vector_store.add_documents(contextual_documents)
         return ids
