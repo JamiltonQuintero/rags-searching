@@ -12,6 +12,7 @@ from app.db_manager.vector_store_contextual import VectorDatabaseContextualOpenI
 from fastapi import FastAPI, UploadFile, File, HTTPException
 from app.db_manager.jina_vector_store import JinaLateChunkingDB
 from app.db_manager.vector_store_naive import VectorDatabaseNaive
+from app.db_manager.elasticsearch_store import ElasticsearchStore
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -27,6 +28,9 @@ vector_db = VectorDatabaseContextualOpenIA()
 jina_db = JinaLateChunkingDB()
 naive = VectorDatabaseNaive()
 
+# Instancia global de ElasticsearchStore
+es_store = ElasticsearchStore()
+
 # Modelos de datos separados para cada tipo de query
 class ContextualQueryPayload(BaseModel):
     query: str
@@ -39,6 +43,11 @@ class JinaQueryPayload(BaseModel):
     k: Optional[int] = 20
 
 class ComparativeQueryPayload(BaseModel):
+    query: str
+    filters: Optional[dict] = None
+    k: Optional[int] = 20
+
+class ElasticsearchQueryPayload(BaseModel):
     query: str
     filters: Optional[dict] = None
     k: Optional[int] = 20
@@ -109,6 +118,30 @@ async def upload_pdf_jina(file: UploadFile = File(...)):
             "status": "success",
             "message": "PDF cargado y procesado correctamente con motor Jina",
             "document_ids": ids
+        }
+    finally:
+        if os.path.exists(temp_file_path):
+            os.remove(temp_file_path)
+
+@app.post("/upload-pdf/elasticsearch")
+async def upload_pdf_elasticsearch(file: UploadFile = File(...)):
+    if not file.filename.endswith('.pdf'):
+        return {"error": "El archivo debe ser un PDF"}
+
+    temp_file_path = f"temp_{file.filename}"
+    try:
+        with open(temp_file_path, "wb") as buffer:
+            content = await file.read()
+            buffer.write(content)
+
+        # Procesar el PDF con Elasticsearch
+        documents = es_store.process_pdf(temp_file_path)
+
+        return {
+            "filename": file.filename,
+            "status": "success",
+            "message": "PDF cargado y procesado correctamente con Elasticsearch",
+            "chunks_processed": len(documents)
         }
     finally:
         if os.path.exists(temp_file_path):
@@ -236,6 +269,31 @@ async def process_comparative_query(payload: ComparativeQueryPayload):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error al procesar la consulta comparativa: {str(e)}")
 
+@app.post("/query/hybrid-search")
+async def process_hybrid_search(payload: ElasticsearchQueryPayload):
+    try:
+        if not payload.query.strip():
+            raise HTTPException(status_code=400, detail="La consulta no puede estar vacía")
+
+        results = es_store.search(
+            query=payload.query,
+            k=payload.k
+        )
+
+        if not results:
+            return {
+                "query": payload.query,
+                "results": [],
+                "message": "No se encontraron resultados para la consulta"
+            }
+
+        return {
+            "query": payload.query,
+            "results": results,
+            "message": "Búsqueda híbrida exitosa"
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error al procesar la consulta: {str(e)}")
 
 def combine_results(contextual_results: List[dict], jina_results: List[dict]) -> List[dict]:
     """
@@ -262,7 +320,6 @@ def combine_results(contextual_results: List[dict], jina_results: List[dict]) ->
             pass  # O agregarlo con jina_score=None
     return combined_results
 
-
 def _normalize_scores(results: List[dict], score_key: str) -> List[dict]:
     """Normaliza los puntajes al rango [0,1] para hacer comparables los resultados"""
     if not results:
@@ -285,7 +342,6 @@ def _normalize_scores(results: List[dict], score_key: str) -> List[dict]:
         normalized_results.append(result_copy)
 
     return normalized_results
-
 
 @app.get("/health")
 async def health_check():

@@ -16,10 +16,11 @@ psycopg
 python-multipart
 tiktoken~=0.8.0
 pdfplumber~=0.11.4
-nltk
+nltk~=3.9.1
 langchain-openai~=0.2.11
 langchain-community~=0.3.9
 langchain-experimental~=0.3.3
 langchain_postgres
 portkey_ai
 langchain~=0.3.9
+elasticsearch~=8.16.0
