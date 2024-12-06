@@ -115,8 +115,8 @@ class ElasticsearchStore:
             "content": input_text,
             "return_chunks": True,
             "max_chunk_length": max_chunk_length,
-            "tokenizer": "cl100k_base",  # Puedes ajustar el tokenizer si es necesario
-            "return_overlaps": False  # Asumimos que no necesitamos solapamiento
+            "tokenizer": "cl100k_base",
+            "return_overlaps": False
         }
 
         # Realizar la solicitud a la API
@@ -144,7 +144,7 @@ class ElasticsearchStore:
                 "field": self.vector_field,
                 "query_vector": query_vector,
                 "k": k,
-                "num_candidates": 100  # Puedes ajustar este valor según tus necesidades
+                "num_candidates": 100
             }
         }
 

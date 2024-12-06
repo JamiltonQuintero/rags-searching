@@ -1,0 +1,315 @@
+{
+	"info": {
+		"_postman_id": "a2b74ac1-8cd8-4175-b18c-d1a271a81412",
+		"name": "TINKERS - IA",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+		"_exporter_id": "12009327",
+		"_collection_link": "https://grey-capsule-94690.postman.co/workspace/Entrevistador_backs~32bb21a4-a6e0-4404-87c0-d5dad7dba5a7/collection/12009327-a2b74ac1-8cd8-4175-b18c-d1a271a81412?action=share&source=collection_link&creator=12009327"
+	},
+	"item": [
+		{
+			"name": "normal-querys",
+			"item": [
+				{
+					"name": "upload-pdf/naive",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "file",
+									"type": "file",
+									"src": "/Users/jamiltonalonsoquinteroosorio/Downloads/Ley Chile - Ley 21180 - Biblioteca del Congreso Nacional.pdf"
+								}
+							]
+						},
+						"url": {
+							"raw": "http://localhost:8005/upload-pdf/naive",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "8005",
+							"path": [
+								"upload-pdf",
+								"naive"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "upload-pdf",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "file",
+									"type": "file",
+									"src": "/Users/jamiltonalonsoquinteroosorio/Downloads/Ley Chile - Ley 21180 - Biblioteca del Congreso Nacional.pdf"
+								}
+							]
+						},
+						"url": {
+							"raw": "http://localhost:8005/upload-pdf",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "8005",
+							"path": [
+								"upload-pdf"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "upload-pdf/jina",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "file",
+									"type": "file",
+									"src": "/Users/jamiltonalonsoquinteroosorio/Downloads/Ley Chile - Ley 21180 - Biblioteca del Congreso Nacional.pdf"
+								}
+							]
+						},
+						"url": {
+							"raw": "http://localhost:8005/upload-pdf/jina",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "8005",
+							"path": [
+								"upload-pdf",
+								"jina"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "upload-pdf/contextual",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "file",
+									"type": "file",
+									"src": "/Users/jamiltonalonsoquinteroosorio/Downloads/Ley Chile - Ley 21180 - Biblioteca del Congreso Nacional.pdf"
+								}
+							]
+						},
+						"url": {
+							"raw": "http://localhost:8005/upload-pdf/contextual",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "8005",
+							"path": [
+								"upload-pdf",
+								"contextual"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "query/naive",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"query\": \"fecha publicacion\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "http://localhost:8005/query/naive",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "8005",
+							"path": [
+								"query",
+								"naive"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "query/jina",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"query\": \"fecha publicacion\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "http://localhost:8005/query/jina",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "8005",
+							"path": [
+								"query",
+								"jina"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "query/contextual",
+					"request": {
+						"method": "TRACE",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"query\": \"Cual es la fecha de publicacion de este documento?\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "http://localhost:8005/query/contextual",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "8005",
+							"path": [
+								"query",
+								"contextual"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "hybrid-querys",
+			"item": [
+				{
+					"name": "upload-pdf/elasticsearch",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "file",
+									"type": "file",
+									"src": "/Users/jamiltonalonsoquinteroosorio/Downloads/Ley Chile - Ley 21180 - Biblioteca del Congreso Nacional.pdf"
+								}
+							]
+						},
+						"url": {
+							"raw": "http://localhost:8005/upload-pdf/elasticsearch",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "8005",
+							"path": [
+								"upload-pdf",
+								"elasticsearch"
+							]
+						}
+					},
+					"response": []
+				},
+				{
+					"name": "query/hybrid-search",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"query\": \" fecha publicacion\"\n}",
+							"options": {
+								"raw": {
+									"language": "json"
+								}
+							}
+						},
+						"url": {
+							"raw": "http://localhost:8005/query/hybrid-search",
+							"protocol": "http",
+							"host": [
+								"localhost"
+							],
+							"port": "8005",
+							"path": [
+								"query",
+								"hybrid-search"
+							]
+						}
+					},
+					"response": []
+				}
+			]
+		},
+		{
+			"name": "query/comparative",
+			"request": {
+				"method": "POST",
+				"header": [],
+				"body": {
+					"mode": "raw",
+					"raw": "{\n    \"query\": \"Berlin\"\n}",
+					"options": {
+						"raw": {
+							"language": "json"
+						}
+					}
+				},
+				"url": {
+					"raw": "http://localhost:8005/query/comparative",
+					"protocol": "http",
+					"host": [
+						"localhost"
+					],
+					"port": "8005",
+					"path": [
+						"query",
+						"comparative"
+					]
+				}
+			},
+			"response": []
+		}
+	]
+}
